@@ -1,5 +1,4 @@
 import torch
-import itertools
 import csv
 import os
 import numpy as np
@@ -7,9 +6,12 @@ import numpy as np
 from torch.utils.data import DataLoader, Subset
 from torchvision.models.segmentation import deeplabv3_resnet50
 from torchvision.models import ResNet50_Weights
+from sklearn.model_selection import KFold
+
 from dataset import train_dataset, test_dataset
 from utils import set_seed
 from evaluate import evaluate
+from train import train
 
 set_seed()
 epochs = 100
@@ -17,52 +19,64 @@ epochs = 100
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
 
-train_loader = DataLoader(
-    train_dataset,
-    batch_size = 4,
-    shuffle = True
-)
+kfold = KFold(n_splits=5, shuffle=True, random_state=42)
 
-test_loader = DataLoader(
-    test_dataset,
-    batch_size = 4,
-    shuffle = True
-)
+fold_dice = []
+fold_iou = []
 
-model = deeplabv3_resnet50(
-    weights = None,
-    weights_backbone = ResNet50_Weights.IMAGENET1K_V1,
-    num_classes = 1,
-    aux_loss = True
-).to(device)
+os.makedirs("results", exist_ok=True)
 
-criterion = torch.nn.BCEWithLogitsLoss()
+for fold, (train_idx, val_idx) in enumerate(kfold.split(train_dataset)):
 
-optimizer = torch.optim.Adam(
-    model.parameters(),
-    lr = 3e-4,
-    weight_decay = 0.0
-)
+    print(f"Fold {fold+1}/{5}")
 
-for epoch in range(epochs):
-    model.train()
+    train_subset = Subset(train_dataset, train_idx)
+    val_subset = Subset(train_dataset, val_idx)
+    
+    train_loader = DataLoader(
+        train_subset,
+        batch_size = 4,
+        shuffle = True
+    )
 
-    for imgs, masks in train_loader:
-        imgs, masks = imgs.to(device), masks.to(device)
+    val_loader = DataLoader(
+        val_subset,
+        batch_size = 4,
+        shuffle = True
+    )
 
-        outputs = model(imgs)
+    model = deeplabv3_resnet50(
+        weights = None,
+        weights_backbone = ResNet50_Weights.IMAGENET1K_V1,
+        num_classes = 1,
+        aux_loss = True
+    ).to(device)
 
-        loss = criterion(outputs['out'], masks)
+    criterion = torch.nn.BCEWithLogitsLoss()
 
-        loss += 0.4 * criterion(outputs['aux'], masks)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr = 3e-4,
+        weight_decay = 0.0
+    )
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    train(
+        model,
+        train_loader,
+        val_loader,
+        criterion,
+        optimizer,
+        epochs=epochs,
+        device=device,
+        aux_loss=True
+    )
 
-    print(f"Epoch [{epoch+1}/{epochs}] - Loss: {loss.item():.4f}")
+    metrics = evaluate(model, val_loader, device)
+
+    fold_dice.append(metrics["dice"])
+    fold_iou.append(metrics["iou"])
+
+    print("Fold Dice:", metrics["dice"])
+    print("Fold IoU:", metrics["iou"])
 
 torch.save(model.state_dict(), "deeplabv3_oscc.pth")
-
-results = evaluate(model, test_loader, device)
-print(results)

@@ -10,6 +10,7 @@ import numpy as np
 from grid_search import run_grid_search
 from utils import set_seed
 from dataset import train_dataset, test_dataset
+from grid_search_losses import run_loss_experiment
 '''
 class OSCCDataset(Dataset):
     def __init__(self, images_dir, masks_dir):
@@ -46,10 +47,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
-    #train_dataset = OSCCDataset(TRAIN_IMG_DIR, TRAIN_MASK_DIR)
-    #test_dataset = OSCCDataset(TEST_IMG_DIR, TEST_MASK_DIR)
+    train_dataset = OSCCDataset(TRAIN_IMG_DIR, TRAIN_MASK_DIR)
+    test_dataset = OSCCDataset(TEST_IMG_DIR, TEST_MASK_DIR)
 
     results = run_grid_search(train_dataset, device)
+    print(run_loss_experiment(train_dataset, device))
 
     save_results_to_csv(results)
 
